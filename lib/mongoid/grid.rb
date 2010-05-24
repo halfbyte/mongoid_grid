@@ -1,11 +1,15 @@
 require 'mime/types'
 require 'mongoid'
+require 'active_support/all'
 module Mongoid
   module Grid
     
     def self.included(base)
       base.send(:extend,  ClassMethods)
       base.send(:include, InstanceMethods)
+      base.class_inheritable_accessor :attachment_types
+      base.attachment_types = []
+      
     end
   
     module ClassMethods
@@ -41,7 +45,14 @@ module Mongoid
         define_method(name) do
           grid.get(attributes["#{name}_id"]) if attributes["#{name}_id"]
         end
-
+        
+        ##
+        # Returns true if attachment exists.
+        # eg: image?
+        define_method("#{name}?") do
+          !!attributes["#{name}_id"]
+        end
+        
         ##
         # Create a method to set the attachment
         # eg: object.image = File.open('/tmp/somefile.jpg')
@@ -71,10 +82,10 @@ module Mongoid
       end
       
       ##
-      # All the attachments types for this class
-      def attachment_types
-        @attachment_types ||= []
-      end
+      # # All the attachments types for this class
+      # def attachment_types
+      #   super + (@attachment_types ||= [])
+      # end
       
     end
 
@@ -107,7 +118,7 @@ module Mongoid
                      file.original_filename : File.basename(file.path)
           type = MIME::Types.type_for(filename).first
           mime = type ? type.content_type : "application/octet-stream" 
-          send("#{name}_id=",   BSON::ObjectID.new)
+          send("#{name}_id=",   BSON::ObjectID.new) if attributes["#{name}_id"].nil?
           send("#{name}_name=", filename)
           send("#{name}_size=", File.size(file))
           send("#{name}_type=", mime)
@@ -118,6 +129,8 @@ module Mongoid
       ##
       # Save an attachment to GridFS
       def create_grid_attachment(name,file)
+        file.rewind if file.respond_to?(:rewind)
+        grid.delete(attributes["#{name}_id"])
         grid.put(
           file.read, 
           :filename => attributes["#{name}_name"],
@@ -160,7 +173,7 @@ module Mongoid
       # Deletes all attachments from document
       def destroy_attachments
         self.class.attachment_types.each do |name| 
-          delete_attachment(name, send("#{name}_id"))
+          delete_grid_attachment(name, send("#{name}_id"))
         end
       end
       
